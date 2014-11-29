@@ -1,0 +1,12 @@
+Name: xbmc-client
+Version: 1.0.0
+Build-type: Simple
+Description:
+ Library to access xbmc
+Author: Sebastien Canart
+Maintainer: kokotchy@gmail.com
+Cabal-Version: >= 1.2
+library
+ Build-Depends: base >= 2.0
+              , network >= 2.6.0.2 && < 2.6.0.3
+              , HTTP >= 4000.2.18 && < 4000.2.19
