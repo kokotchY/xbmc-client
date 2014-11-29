@@ -4,11 +4,21 @@ import Network.URI
 import Text.ParserCombinators.Parsec hiding ((<|>),many)
 import Control.Applicative
 import Numeric
+import Data.List (intersperse)
 
-json = "{\"jsonrpc\": \"2.0\", \"method\": \"Player.GetItem\", \"params\": { \"properties\": [\"title\", \"album\", \"artist\", \"duration\", \"thumbnail\", \"file\", \"fanart\", \"streamdetails\"], \"playerid\": 0 }, \"id\": \"AudioGetItem\"}"
+json = "{\"jsonrpc\": \"2.0\", \"method\": \"Player.GetItem\", \"params\": { \"properties\": [\"title\", \"album\", \"artist\", \"duration\", \"thumbnail\", \"file\", \"fanart\", \"streamdetails\"], \"playerid\": 0 }, \"id\": \"AudioGetItem2\"}"
 
 
 pause = "{\"jsonrpc\": \"2.0\", \"method\": \"Player.PlayPause\", \"params\": { \"playerid\": 0 }, \"id\": 1}"
+
+pause2 = JObject (JObj
+    [ ("jsonrpc", JString "2.0")
+    , ("method", JString "Player.PlayPause")
+    , ("params", JObject (JObj
+        [ ("playerid", JInteger 0)
+        ]))
+    , ("id", JNumber 1)
+    ])
 
 stringUrl = "http://192.168.1.42:8080/jsonrpc"
 url = case parseURI stringUrl of
@@ -39,11 +49,29 @@ bla request = do
 
 data JValue = JString String
     | JNumber Double
+    | JInteger Double
     | JBool Bool
     | JNull
     | JObject (JObj JValue)
     | JArray (JAry JValue)
     deriving (Eq, Ord, Show)
+
+convertJsonToString :: JValue -> String
+convertJsonToString (JString string) = "\"" ++ string ++ "\""
+convertJsonToString (JNumber number) = show number
+convertJsonToString (JInteger number) = show $ truncate number
+convertJsonToString (JBool True) = "true"
+convertJsonToString (JBool False) = "false"
+convertJsonToString JNull = "null"
+convertJsonToString (JObject bla) = "{" ++convertJsonObjToString bla ++ "}"
+
+convertJsonObjToString :: JObj JValue -> String
+convertJsonObjToString bla = concat $ intersperse "," $ map (\(x,y) -> "\"" ++ x ++ "\": " ++ convertJsonToString y) elements
+    where
+        elements = fromJObj bla
+
+
+obj = JObject (JObj {fromJObj = [("id",JString "AudioGetItem2"),("jsonrpc", JString "2.0")]})
 
 newtype JAry a = JAry {
     fromJAry :: [a]
@@ -79,6 +107,7 @@ p_value = value <* spaces
     where
         value = JString <$> p_string
             <|> JNumber <$> p_number
+            <|> JInteger <$> p_number
             <|> JObject <$> p_object
             <|> JArray <$> p_array
             <|> JBool <$> p_bool
