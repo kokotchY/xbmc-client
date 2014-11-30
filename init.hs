@@ -248,7 +248,12 @@ getVolume = do
 
 setVolume :: Double -> IO (Either String JValue)
 setVolume volume =
-    queryXbmc $ createCall Application SetVolume [createKeyIntValue "volume" (min volume 100)]
+    queryXbmc $ createCall Application SetVolume [createKeyIntValue "volume" $ normalizeVolume volume]
+    where
+        normalizeVolume volume
+            | volume >= 100 = 100
+            | volume <= 0 = 0
+            | otherwise = volume
 
 volumeUp :: IO (Either String JValue)
 volumeUp = do
