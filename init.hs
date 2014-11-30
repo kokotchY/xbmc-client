@@ -5,11 +5,160 @@ import Text.ParserCombinators.Parsec hiding ((<|>),many)
 import Control.Applicative
 import Numeric
 import Data.List (intersperse)
+import Control.Arrow ((&&&))
 
 json = "{\"jsonrpc\": \"2.0\", \"method\": \"Player.GetItem\", \"params\": { \"properties\": [\"title\", \"album\", \"artist\", \"duration\", \"thumbnail\", \"file\", \"fanart\", \"streamdetails\"], \"playerid\": 0 }, \"id\": \"AudioGetItem2\"}"
 
-
 pause = "{\"jsonrpc\": \"2.0\", \"method\": \"Player.PlayPause\", \"params\": { \"playerid\": 0 }, \"id\": 1}"
+
+
+data MethodName = ActivateWindow
+    | Add
+    | Back
+    | Clean
+    | Clear
+    | ContextMenu
+    | Down
+    | Download
+    | EjectOpticalDrive
+    | ExecuteAction
+    | ExecuteAddon
+    | Export
+    | GetActivePlayers
+    | GetAddonDetails
+    | GetAddons
+    | GetAlbumDetails
+    | GetAlbums
+    | GetArtistDetails
+    | GetArtists
+    | GetChannelDetails
+    | GetChannelGroupDetails
+    | GetChannelGroups
+    | GetChannels
+    | GetConfiguration
+    | GetDirectory
+    | GetEpisodeDetails
+    | GetEpisodes
+    | GetFileDetails
+    | GetGenres
+    | GetInfoBooleans
+    | GetInfoLabels
+    | GetItem
+    | GetItems
+    | GetMovieDetails
+    | GetMovieSetDetails
+    | GetMovieSets
+    | GetMovies
+    | GetMusicVideoDetails
+    | GetMusicVideos
+    | GetPlaylists
+    | GetProperties
+    | GetRecentlyAddedAlbums
+    | GetRecentlyAddedEpisodes
+    | GetRecentlyAddedMovies
+    | GetRecentlyAddedMusicVideos
+    | GetRecentlyAddedSongs
+    | GetRecentlyPlayedAlbums
+    | GetRecentlyPlayedSongs
+    | GetSeasons
+    | GetSongDetails
+    | GetSongs
+    | GetSources
+    | GetTVShowDetails
+    | GetTVShows
+    | GoTo
+    | Hibernate
+    | Home
+    | Info
+    | Insert
+    | Introspect
+    {-| Left-}
+    | Move
+    | NotifyAll
+    | Open
+    | Permission
+    | Ping
+    | PlayPause
+    | PrepareDownload
+    | Quit
+    | Reboot
+    | Record
+    | Remove
+    | RemoveEpisode
+    | RemoveMovie
+    | RemoveMusicVideo
+    | RemoveTVShow
+    {-| Right-}
+    | Rotate
+    | Scan
+    | Seek
+    | Select
+    | SendText
+    | SetAddonEnabled
+    | SetAlbumDetails
+    | SetArtistDetails
+    | SetAudioStream
+    | SetConfiguration
+    | SetEpisodeDetails
+    | SetFullscreen
+    | SetMovieDetails
+    | SetMusicVideoDetails
+    | SetMute
+    | SetPartymode
+    | SetRepeat
+    | SetShuffle
+    | SetSongDetails
+    | SetSpeed
+    | SetSubtitle
+    | SetTVShowDetails
+    | SetVolume
+    | ShowCodec
+    | ShowNotification
+    | ShowOSD
+    | Shutdown
+    | Stop
+    | Suspend
+    | Swap
+    | Up
+    | Version
+    | Zoom
+    deriving (Show, Eq, Enum, Bounded)
+data MethodGroup = Addons
+    | Application
+    | AudioLibrary
+    | Files
+    | GUI
+    | Input
+    | JSONRPC
+    | PVR
+    | Player
+    | Playlist
+    | System
+    | VideoLibrary
+    | XBMC
+    deriving (Show, Eq, Enum, Bounded)
+
+allEnumWithString :: (Enum a, Bounded a, Show a) => [(a, String)]
+allEnumWithString = map (id &&& show) $ [minBound..maxBound]
+
+createCall :: MethodGroup -> MethodName -> [(String, JValue)] -> JValue
+createCall methodGroup methodName params = JObject (JObj
+    [ ("jsonrpc", JString "2.0")
+    , ("method", JString method)
+    , ("params", JObject (JObj params))
+    , ("id", JNumber 1)
+    ])
+    where
+        methodGroupString = case lookup methodGroup allEnumWithString of
+            Just name -> name
+            Nothing -> "Unkown"
+        methodNameString = case lookup methodName allEnumWithString of
+            Just name -> name
+            Nothing -> "Unkown"
+        method = methodGroupString ++ "." ++ methodNameString
+
+createCallNoParams :: MethodGroup -> MethodName -> JValue
+createCallNoParams group name = createCall group name []
 
 pause2 = JObject (JObj
     [ ("jsonrpc", JString "2.0")
@@ -19,6 +168,15 @@ pause2 = JObject (JObj
         ]))
     , ("id", JNumber 1)
     ])
+
+createKeyValue :: String -> String -> (String, JValue)
+createKeyValue key value = (key, JString value)
+
+createKeyArray :: String -> [String] -> (String, JValue)
+createKeyArray key value = (key, JArray (JAry $ map JString value))
+
+createKeyIntValue :: String -> Double -> (String, JValue)
+createKeyIntValue key value = (key, JInteger value)
 
 stringUrl = "http://192.168.1.42:8080/jsonrpc"
 url = case parseURI stringUrl of
@@ -42,7 +200,72 @@ myAuth = AuthBasic
     , auSite = url
     }
 
-bla request = do
+queryXbmc :: JValue -> IO (Either String JValue)
+queryXbmc json = do
+    q <- simpleHTTP $ myRequest $ convertJsonToString json
+    response <- getResponseBody q
+    case parse p_text "FromXBMC" response of
+        Left error -> return $ Left $ "Error when trying to parse response: " ++ show error
+        Right parsedResponse -> return $ Right parsedResponse
+
+getResult :: JValue -> JValue
+getResult bla@(JObject obj) = case lookup "result" (fromJObj obj) of
+    Nothing -> case lookup "error" (fromJObj obj) of
+        Nothing -> JString "No result and no error"
+        Just (JObject error) -> case lookup "message" (fromJObj error) of
+            Nothing -> JString "Error without error message"
+            Just message -> message
+    Just obj2 -> obj2
+
+getRight :: Either a b -> b
+getRight (Right r) = r
+
+playPauseResult :: Double -> IO JValue
+playPauseResult playerId = do
+    response <- queryXbmc $ createCall Player PlayPause [createKeyIntValue "playerid" playerId]
+    return $ case response of
+        Right res -> getResult res
+        Left string -> JString string
+
+nextSong :: IO (Either String JValue)
+nextSong =
+    queryXbmc $ createCall Player GoTo [createKeyIntValue "playerid" 0, createKeyValue "to" "next"]
+
+
+getVolume :: IO (Maybe Double)
+getVolume = do
+    response <- queryXbmc $ createCall Application GetProperties [createKeyArray "properties" ["volume"]]
+    return $ case response of
+        Left string -> Nothing
+        Right (JObject res) -> case lookup "result" (fromJObj res) of
+            Nothing -> Nothing
+            Just (JObject res) -> case lookup "volume" (fromJObj res) of
+                Nothing -> Nothing
+                Just (JInteger nb) -> Just nb
+                Just (JNumber nb) -> Just nb
+            Just res -> Nothing
+        Right _ -> Nothing
+
+setVolume :: Double -> IO (Either String JValue)
+setVolume volume =
+    queryXbmc $ createCall Application SetVolume [createKeyIntValue "volume" (min volume 100)]
+
+volumeUp :: IO (Either String JValue)
+volumeUp = do
+    volume <- getVolume
+    case volume of
+        Nothing -> return $ Left "No volume detected"
+        Just volume -> setVolume (volume + 5)
+
+volumeDown :: IO (Either String JValue)
+volumeDown = do
+    volume <- getVolume
+    case volume of
+        Nothing -> return $ Left "No volume detected"
+        Just volume -> setVolume (volume - 5)
+
+
+queryAndParse request = do
     query <- simpleHTTP request
     response <- getResponseBody query
     parseTest p_text $ response
@@ -64,11 +287,17 @@ convertJsonToString (JBool True) = "true"
 convertJsonToString (JBool False) = "false"
 convertJsonToString JNull = "null"
 convertJsonToString (JObject bla) = "{" ++convertJsonObjToString bla ++ "}"
+convertJsonToString (JArray array) = "[" ++ convertJsonAryToString array ++ "]"
 
 convertJsonObjToString :: JObj JValue -> String
 convertJsonObjToString bla = concat $ intersperse "," $ map (\(x,y) -> "\"" ++ x ++ "\": " ++ convertJsonToString y) elements
     where
         elements = fromJObj bla
+
+convertJsonAryToString :: JAry JValue -> String
+convertJsonAryToString array = concat $ intersperse "," $ map convertJsonToString elements
+    where
+        elements = fromJAry array
 
 
 obj = JObject (JObj {fromJObj = [("id",JString "AudioGetItem2"),("jsonrpc", JString "2.0")]})
