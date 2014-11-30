@@ -220,16 +220,18 @@ getResult bla@(JObject obj) = case lookup "result" (fromJObj obj) of
 getRight :: Either a b -> b
 getRight (Right r) = r
 
-playPauseResult :: Double -> IO JValue
-playPauseResult playerId = do
-    response <- queryXbmc $ createCall Player PlayPause [createKeyIntValue "playerid" playerId]
+playPause :: IO JValue
+playPause = do
+    params <- withCurrentPlayer []
+    response <- queryXbmc $ createCall Player PlayPause params
     return $ case response of
         Right res -> getResult res
         Left string -> JString string
 
 nextSong :: IO (Either String JValue)
-nextSong =
-    queryXbmc $ createCall Player GoTo [createKeyIntValue "playerid" 0, createKeyValue "to" "next"]
+nextSong = do
+    params <- withCurrentPlayer [createKeyValue "to" "next"]
+    queryXbmc $ createCall Player GoTo params
 
 
 getVolume :: IO (Maybe Double)
@@ -254,6 +256,53 @@ setVolume volume =
             | volume >= 100 = 100
             | volume <= 0 = 0
             | otherwise = volume
+
+getOneActivePlayer :: IO (Maybe Double)
+getOneActivePlayer = do
+    response <- queryXbmc $ createCallNoParams Player GetActivePlayers
+    return $ case response of
+        Left error -> Nothing
+        Right (JObject res) -> case lookup "result" (fromJObj res) of
+            Nothing -> Nothing
+            Just (JArray array) -> case length (fromJAry array) of
+                1 -> case head $ fromJAry array of
+                        JObject obj -> case lookup "playerid" (fromJObj obj) of
+                            Nothing -> Nothing
+                            Just (JNumber nb) -> Just nb
+                        otherwise -> Nothing
+                otherwise -> Nothing
+
+getCurrentActivePlayer :: IO Double
+getCurrentActivePlayer = do
+    maybePlayerId <- getOneActivePlayer
+    return $ case maybePlayerId of
+        Nothing -> -1.0
+        Just nb -> nb
+
+withCurrentPlayer :: [(String, JValue)] -> IO [(String, JValue)]
+withCurrentPlayer params = do
+    playerid <- getCurrentActivePlayer
+    return $ createKeyIntValue "playerid" playerid:params
+
+currentSong :: IO (Maybe String)
+currentSong = do
+    params <- withCurrentPlayer [createKeyArray "properties" ["artist", "title"]]
+    response <- queryXbmc $ createCall Player GetItem params
+    return $ case response of
+        Left error -> Nothing
+        Right (JObject res) -> case lookup "result" (fromJObj res) of
+            Nothing -> Nothing
+            Just (JObject res) -> case lookup "item" (fromJObj res) of
+                Nothing -> Nothing
+                Just res -> Just $ (artist res) ++ " - " ++ (title res)
+    where
+        artist res = bla "artist" res
+        title res = bla "title" res
+        bla name (JArray res) = concat $ intersperse "," $ map convertJsonToString $ fromJAry res
+        bla name (JObject res) = case lookup name (fromJObj res) of
+            Nothing -> ""
+            Just (JString value) -> value
+            Just (JArray res) -> concat $ intersperse "," $ map (\(JString res) -> res) $ fromJAry res
 
 volumeUp :: IO (Either String JValue)
 volumeUp = changeVolumeBy (+5)
