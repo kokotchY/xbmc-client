@@ -256,19 +256,21 @@ setVolume volume =
             | otherwise = volume
 
 volumeUp :: IO (Either String JValue)
-volumeUp = do
-    volume <- getVolume
-    case volume of
-        Nothing -> return $ Left "No volume detected"
-        Just volume -> setVolume (volume + 5)
+volumeUp = changeVolumeBy (+5)
 
 volumeDown :: IO (Either String JValue)
-volumeDown = do
+volumeDown = changeVolumeBy (\x -> x - 5)
+
+getNewVolume :: (Double -> Double) -> Double -> Double
+getNewVolume func current = func current
+
+
+changeVolumeBy :: (Double -> Double) -> IO (Either String JValue)
+changeVolumeBy func = do
     volume <- getVolume
     case volume of
         Nothing -> return $ Left "No volume detected"
-        Just volume -> setVolume (volume - 5)
-
+        Just volume -> setVolume $ func volume
 
 queryAndParse request = do
     query <- simpleHTTP request
